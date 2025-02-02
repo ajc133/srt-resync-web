@@ -1,7 +1,10 @@
 [project]
-name = "srt-resync"
+name = "srt-resync-web"
 version = "0.1.0"
-description = "Add your description here"
+description = "Upload srt file for resyncing"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "flask>=3.1.0",
+    "werkzeug>=3.1.3",
+]

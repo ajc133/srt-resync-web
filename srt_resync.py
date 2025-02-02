@@ -30,8 +30,8 @@ import os
 import re
 import shutil
 import sys
-
 from io import FileIO as file
+from pathlib import Path
 
 VERSION = "0.1"
 
@@ -74,25 +74,45 @@ def offset_time(offset, time_string):
     ts = time_string.replace(",", ":").split(":")
     ts = [int(x) for x in ts]
     # millisecond -> microsecond
-    ts = datetime.datetime(2013, 1, 1, ts[0], ts[1], ts[2], ts[3] * 1000)
+    ts = datetime.datetime(2013, 1, 2, ts[0], ts[1], ts[2], ts[3] * 1000)
+    yesterday = datetime.datetime(2013, 1, 1, 23, 59, 59, 9999)
 
     delta = datetime.timedelta(seconds=offset)
     ts += delta
 
-    if ts.year != 2013 or ts.month != 1 or ts.day != 1:
-        sys.exit("ERROR: invalid offset resulting timestamp overflow")
+    if ts < yesterday:
+        raise ValueError("offset would set timestamp to negative")
 
     # microsecond -> millisecond
     return "%s,%s" % (ts.strftime("%H:%M:%S"), rzeropad(ts.microsecond / 1000))
 
 
-def modify_file(options):
-    if ".srt" not in options.srt_file.name:
-        sys.exit("ERROR: invalid srt file")
+def get_modified_filename(name: str) -> str:
+    return os.path.splitext(name)[0] + "-resync.srt"
 
-    out_filename = os.path.splitext(options.srt_file.name)[0] + "-resync.srt"
-    with open(out_filename, "w", encoding="utf-8") as out:
-        with open(options.srt_file.name, "r", encoding="utf-8") as srt:
+
+def modify_file(
+    in_dir: Path | None,
+    infile_name: str,
+    out_dir: Path | None,
+    offset: int,
+    overwrite: bool,
+):
+    if ".srt" not in infile_name:
+        raise ValueError("file name must end in .srt")
+
+    if not in_dir:
+        infile_path = Path(infile_name)
+    else:
+        infile_path = in_dir / infile_name
+
+    if not out_dir:
+        outfile_path = Path(get_modified_filename(infile_name))
+    else:
+        outfile_path = out_dir / get_modified_filename(infile_name)
+
+    with open(outfile_path, "w", encoding="utf-8") as out:
+        with open(infile_path, "r", encoding="utf-8") as srt:
             for line in srt.readlines():
                 match = re.search(
                     r"^(\d+:\d+:\d+,\d+)\s+--\>\s+(\d+:\d+:\d+,\d+)", line
@@ -101,16 +121,26 @@ def modify_file(options):
                     out.write(
                         "%s --> %s\n"
                         % (
-                            offset_time(options.offset, match.group(1)),
-                            offset_time(options.offset, match.group(2)),
+                            offset_time(offset, match.group(1)),
+                            offset_time(offset, match.group(2)),
                         )
                     )
                 else:
                     out.write(line)
 
-    if options.overwrite:
-        shutil.move(out_filename, options.srt_file.name)
+    if overwrite:
+        shutil.move(outfile_path, infile_path)
 
 
 if __name__ == "__main__":
-    modify_file(parse_options())
+    options = parse_options()
+    try:
+        modify_file(
+            in_dir=None,
+            infile_name=options.srt_file.name,
+            out_dir=None,
+            offset=options.offset,
+            overwrite=options.overwrite,
+        )
+    except ValueError as e:
+        sys.exit(f"Error: {e}")
