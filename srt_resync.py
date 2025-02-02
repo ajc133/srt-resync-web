@@ -32,6 +32,7 @@ import shutil
 import sys
 from io import FileIO as file
 from pathlib import Path
+from typing import Generator, Any
 
 VERSION = "0.1"
 
@@ -45,13 +46,6 @@ def parse_options():
         "offset", type=float, help="Add this many seconds to each timestamp"
     )
     parser.add_argument("srt_file", type=file)
-    parser.add_argument(
-        "-o",
-        "--overwrite",
-        action="store_true",
-        default=False,
-        help="overwite original file",
-    )
     parser.add_argument(
         "--version",
         action="version",
@@ -69,7 +63,7 @@ def rzeropad(ms):
     return ms
 
 
-def offset_time(offset, time_string):
+def offset_time(offset: float, time_string: str):
     # NOTE: does not support timestamps >= 24 hours
     ts = time_string.replace(",", ":").split(":")
     ts = [int(x) for x in ts]
@@ -91,56 +85,36 @@ def get_modified_filename(name: str) -> str:
     return os.path.splitext(name)[0] + "-resync.srt"
 
 
-def modify_file(
-    in_dir: Path | None,
-    infile_name: str,
-    out_dir: Path | None,
+def resync_line(
+    line: str,
     offset: int,
-    overwrite: bool,
-):
-    if ".srt" not in infile_name:
-        raise ValueError("file name must end in .srt")
-
-    if not in_dir:
-        infile_path = Path(infile_name)
+) -> str:
+    match = re.search(r"^(\d+:\d+:\d+,\d+)\s+--\>\s+(\d+:\d+:\d+,\d+)", line)
+    if match:
+        start = offset_time(offset, match.group(1))
+        end = offset_time(offset, match.group(2))
+        return f"{start} --> {end}\n"
     else:
-        infile_path = in_dir / infile_name
-
-    if not out_dir:
-        outfile_path = Path(get_modified_filename(infile_name))
-    else:
-        outfile_path = out_dir / get_modified_filename(infile_name)
-
-    with open(outfile_path, "w", encoding="utf-8") as out:
-        with open(infile_path, "r", encoding="utf-8") as srt:
-            for line in srt.readlines():
-                match = re.search(
-                    r"^(\d+:\d+:\d+,\d+)\s+--\>\s+(\d+:\d+:\d+,\d+)", line
-                )
-                if match:
-                    out.write(
-                        "%s --> %s\n"
-                        % (
-                            offset_time(offset, match.group(1)),
-                            offset_time(offset, match.group(2)),
-                        )
-                    )
-                else:
-                    out.write(line)
-
-    if overwrite:
-        shutil.move(outfile_path, infile_path)
+        return line
 
 
 if __name__ == "__main__":
     options = parse_options()
-    try:
-        modify_file(
-            in_dir=None,
-            infile_name=options.srt_file.name,
-            out_dir=None,
-            offset=options.offset,
-            overwrite=options.overwrite,
-        )
-    except ValueError as e:
-        sys.exit(f"Error: {e}")
+    if not options.srt_file.name.endswith(".srt"):
+        raise sys.exit("ERROR: file name must end in .srt")
+
+    BATCH_SIZE = 1024
+    with (
+        open(options.srt_file.name, "r") as infile,
+        open(get_modified_filename((options.srt_file.name)), "w") as outfile,
+    ):
+        batch = []
+        for line in infile:
+            try:
+                updated_line = resync_line(line, options.offset)
+            except ValueError as e:
+                sys.exit(f"Error: {e}")
+            batch.append(updated_line)
+            if len(batch) > BATCH_SIZE:
+                outfile.writelines(batch)
+                batch = []

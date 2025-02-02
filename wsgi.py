@@ -1,20 +1,28 @@
-from flask import Flask, flash, request, redirect, url_for, send_from_directory, abort
-from pathlib import Path
-from werkzeug.utils import secure_filename
+from typing import Any, Generator
 
-from srt_resync import modify_file, get_modified_filename
+from flask import (
+    Flask,
+    Response,
+    flash,
+    redirect,
+    request,
+)
 
-UPLOAD_FOLDER = "./uploads"
-CONVERTED_FOLDER = "./converted"
+from srt_resync import resync_line
+
 ALLOWED_EXTENSIONS = {"srt"}
 
 app = Flask(__name__)
-app.config["UPLOAD_FOLDER"] = Path(UPLOAD_FOLDER)
-app.config["CONVERTED_FOLDER"] = Path(CONVERTED_FOLDER)
 
 
 def allowed_file(filename: str):
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def resync_file(lines: list[str], offset: float) -> Generator[str, Any, None]:
+    for line in lines:
+        decoded = line.decode("utf-8")
+        yield resync_line(decoded, offset)
 
 
 @app.route("/", methods=["GET", "POST"])
@@ -31,21 +39,16 @@ def upload_file():
             flash("No selected file")
             return redirect(request.url)
         if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            file.save(app.config["UPLOAD_FOLDER"] / filename)
             try:
-                modify_file(
-                    in_dir=app.config["UPLOAD_FOLDER"],
-                    infile_name=filename,
-                    out_dir=app.config["CONVERTED_FOLDER"],
-                    offset=int(request.form["offset"]),
-                    overwrite=False,
+                lines = file.stream.readlines()
+                offset = float(request.form["offset"])
+                return Response(
+                    resync_file(lines, offset),
+                    mimetype="text/plain",
+                    headers={"Content-Disposition": "attachment;filename=resynced.srt"},
                 )
             except ValueError:
-                abort(400)
-            return redirect(
-                url_for("download_file", name=get_modified_filename(filename))
-            )
+                return "Invalid offset value", 400
     return """
     <!doctype html>
     <title>Resync SRT File</title>
@@ -68,11 +71,3 @@ def upload_file():
       <input type=submit value=Upload>
     </form>
     """
-
-
-@app.route("/uploads/<name>")
-def download_file(name):
-    return send_from_directory(app.config["CONVERTED_FOLDER"], name, as_attachment=True)
-
-
-app.add_url_rule("/uploads/<name>", endpoint="download_file", build_only=True)
