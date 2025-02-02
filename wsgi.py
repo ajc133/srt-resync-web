@@ -8,6 +8,7 @@ from flask import (
     request,
 )
 
+from werkzeug.utils import secure_filename
 from srt_resync import resync_line
 
 ALLOWED_EXTENSIONS = {"srt"}
@@ -45,7 +46,9 @@ def upload_file():
                 return Response(
                     resync_file(lines, offset),
                     mimetype="text/plain",
-                    headers={"Content-Disposition": "attachment;filename=resynced.srt"},
+                    headers={
+                        "Content-Disposition": f"attachment;filename={secure_filename(file.filename)}"
+                    },
                 )
             except ValueError:
                 return "Invalid offset value", 400
