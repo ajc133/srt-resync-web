@@ -66,8 +66,6 @@ def upload_file():
         id=offset
         type=number
         name=offset
-        max=86400
-        min=-86400
         placeholder='Seconds to add or subtract'
         width=100px>
       <input type=file name=file>
